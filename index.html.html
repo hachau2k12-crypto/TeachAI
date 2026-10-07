@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ thống Điểm danh Học sinh Thông minh bằng Khuôn mặt</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <!-- SheetJS (xlsx) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Face-api.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.min.js"></script>
+
+    <style>
+        :root {
+            --primary-color: #0d6efd;
+            --success-color: #198754;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --dark-bg: #212529;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-pills .nav-link {
+            font-weight: 600;
+            color: #495057;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            margin-right: 5px;
+        }
+
+        .nav-pills .nav-link.active {
+            background-color: var(--primary-color);
+            color: #fff;
+            box-shadow: 0 4px 10px rgba(13, 110, 253, 0.3);
+        }
+
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s;
+        }
+
+        .stat-card {
+            border-left: 5px solid var(--primary-color);
+        }
+        .stat-card.success { border-left-color: var(--success-color); }
+        .stat-card.warning { border-left-color: var(--warning-color); }
+        .stat-card.danger { border-left-color: var(--danger-color); }
+
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+        }
+
+        video, canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            transform: scaleX(1); /* Mặc định cam sau */
+        }
+        video.front-camera, canvas.front-camera {
+            transform: scaleX(-1); /* Lật gương cho cam trước */
+        }
+
+        .overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+
+        .face-oval-guide {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 220px;
+            height: 280px;
+            border: 3px dashed rgba(255, 255, 255, 0.7);
+            border-radius: 50% / 60%;
+            pointer-events: none;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
+            z-index: 5;
+        }
+
+        .face-oval-guide.valid {
+            border-color: rgba(25, 135, 84, 0.9);
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4), 0 0 20px rgba(25, 135, 84, 0.6);
+        }
+
+        .badge-status {
+            padding: 0.5em 0.8em;
+            font-weight: 500;
+            border-radius: 6px;
+        }
+
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease;
+        }
+
+        .table-responsive {
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .scanner-log-box {
+            max-height: 480px;
+            overflow-y: auto;
+        }
+
+        .pulse-badge {
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(25, 135, 84, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(25, 135, 84, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(25, 135, 84, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- MÀN HÌNH NẠP MODEL AI & TIẾN TRÌNH -->
+    <div id="loading-overlay">
+        <div class="text-center p-4" style="max-width: 500px; width: 100%;">
+            <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+            <h4 class="fw-bold mb-2">Đang khởi động Hệ thống AI Thị giác...</h4>
+            <p id="loading-status-text" class="text-muted small mb-3">Đang kết nối CDN mô hình mạng nơ-ron...</p>
+            <div class="progress mb-3" style="height: 12px; border-radius: 6px;">
+                <div id="loading-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: 0%"></div>
+            </div>
+            <div id="loading-error-box" class="alert alert-danger d-none text-start small mt-3"></div>
+        </div>
+    </div>
+
+    <!-- HEADER & NAVIGATION -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand" href="#">
+                <i class="fa-solid fa-graduation-cap text-warning me-2"></i>SmartAttendance <span class="badge bg-primary fs-6">AI Pro</span>
+            </a>
+            <div class="d-flex align-items-center text-light">
+                <span id="real-time-clock" class="font-monospace fw-bold fs-5 bg-secondary px-3 py-1 rounded">--:--:--</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTAINER -->
+    <main class="container-fluid py-4 px-4">
+        <!-- TABS HEADER -->
+        <ul class="nav nav-pills mb-4 gap-2 bg-white p-2 rounded shadow-sm" id="pills-tab" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-students-btn" data-bs-toggle="pill" data-bs-target="#tab-students" type="button" role="tab"><i class="fa-solid fa-users me-2"></i>Quản lý Học sinh</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-register-btn" data-bs-toggle="pill" data-bs-target="#tab-register" type="button" role="tab"><i class="fa-solid fa-camera-retro me-2"></i>Lấy mẫu Khuôn mặt</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-scanner-btn" data-bs-toggle="pill" data-bs-target="#tab-scanner" type="button" role="tab"><i class="fa-solid fa-face-recognition me-2"></i>Điểm danh Trực tiếp</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-reports-btn" data-bs-toggle="pill" data-bs-target="#tab-reports" type="button" role="tab"><i class="fa-solid fa-chart-line me-2"></i>Báo cáo & Thống kê</button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="pills-tabContent">
+
+            <!-- ================= TAB 1: QUẢN LÝ HỌC SINH ================= -->
+            <div class="tab-pane fade show active" id="tab-students" role="tabpanel">
+                <div class="card p-4 mb-4">
+                    <div class="row align-items-center g-3">
+                        <div class="col-md-7">
+                            <h4 class="fw-bold mb-1"><i class="fa-solid fa-address-book text-primary me-2"></i>Danh sách học sinh toàn trường</h4>
+                            <p class="text-muted mb-0 small">Nhập dữ liệu từ tệp Excel chuẩn hoặc thêm thủ công để hệ thống nhận diện.</p>
+                        </div>
+                        <div class="col-md-5 text-md-end">
+                            <button class="btn btn-outline-success btn-sm me-2" onclick="generateSampleExcel()"><i class="fa-solid fa-file-excel me-1"></i> Tải file mẫu Excel</button>
+                            <label class="btn btn-success btn-sm me-2 mb-0">
+                                <i class="fa-solid fa-file-arrow-up me-1"></i> Nhập từ Excel
+                                <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="d-none" onchange="handleExcelUpload(event)">
+                            </label>
+                            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addStudentModal"><i class="fa-solid fa-user-plus me-1"></i> Thêm thủ công</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BỘ LỌC & TÌM KIẾM -->
+                <div class="card p-3 mb-4">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="input-group">
+                                <span class="input-group-text bg-white"><i class="fa-solid fa-search text-muted"></i></span>
+                                <input type="text" id="student-search-input" class="form-control" placeholder="Tìm theo Mã HS hoặc Họ tên..." oninput="renderStudentsTable()">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <select id="student-filter-class" class="form-select" onchange="renderStudentsTable()">
+                                <option value="">-- Tất cả các lớp --</option>
+                            </select>
+                        </div>
+                        <div class="col-md-5 text-end">
+                            <button class="btn btn-outline-danger btn-sm" onclick="confirmClearAllStudents()"><i class="fa-solid fa-trash-can me-1"></i> Xóa toàn bộ học sinh</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BẢNG DANH SÁCH -->
+                <div class="card p-3">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>STT</th>
+                                    <th>Mã HS</th>
+                                    <th>Họ và tên</th>
+                                    <th>Lớp</th>
+                                    <th>SĐT Phụ huynh</th>
+                                    <th>Trạng thái Mẫu mặt</th>
+                                    <th class="text-center">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="students-table-body">
+                                <!-- Dynamic rendered -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= TAB 2: LẤY MẪU KHUÔN MẶT ================= -->
+            <div class="tab-pane fade" id="tab-register" role="tabpanel">
+                <div class="row g-4">
+                    <div class="col-lg-5">
+                        <div class="card p-4 h-100">
+                            <h4 class="fw-bold mb-3"><i class="fa-solid fa-id-card-clip text-primary me-2"></i>Chọn Học sinh lấy mẫu</h4>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Chọn Lớp:</label>
+                                <select id="reg-class-select" class="form-select" onchange="updateRegStudentList()">
+                                    <option value="">-- Chọn lớp học --</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Chọn Học sinh:</label>
+                                <select id="reg-student-select" class="form-select" onchange="onSelectStudentToRegister()">
+                                    <option value="">-- Chọn học sinh --</option>
+                                </select>
+                            </div>
+
+                            <div id="student-reg-info" class="alert alert-secondary d-none mt-3">
+                                <h6 class="fw-bold mb-1" id="info-reg-name">---</h6>
+                                <p class="mb-1 small">Mã HS: <span id="info-reg-id" class="fw-semibold">---</span></p>
+                                <p class="mb-0 small">Số mẫu đã lưu: <span id="info-reg-count" class="badge bg-dark">0 mẫu</span></p>
+                            </div>
+
+                            <hr class="my-3">
+
+                            <div class="d-grid gap-2">
+                                <button id="btn-toggle-reg-cam" class="btn btn-outline-primary" onclick="toggleRegistrationCamera()"><i class="fa-solid fa-video me-2"></i>Bật Camera Lấy mẫu</button>
+                                <button id="btn-switch-reg-cam" class="btn btn-outline-secondary btn-sm" onclick="switchCamera('reg')" disabled><i class="fa-solid fa-camera-rotate me-1"></i>Đổi Camera Trước/Sau</button>
+                                <button id="btn-capture-face" class="btn btn-success btn-lg shadow-sm" onclick="captureFaceSample()" disabled><i class="fa-solid fa-camera me-2"></i>CHỤP LẤY MẪU KHUÔN MẶT</button>
+                            </div>
+
+                            <div id="reg-guidance-box" class="alert alert-warning mt-3 mb-0 small d-none">
+                                <i class="fa-solid fa-triangle-exclamation me-1"></i> <span id="reg-guidance-text">Đang chờ bật camera...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-7">
+                        <div class="card p-4 text-center h-100 d-flex flex-column justify-content-center align-items-center">
+                            <h5 class="fw-bold mb-3 text-start w-100"><i class="fa-solid fa-camera text-primary me-2"></i>Khung hình căn chỉnh khuôn mặt</h5>
+                            <div class="camera-container mb-3">
+                                <div id="reg-oval-guide" class="face-oval-guide"></div>
+                                <video id="reg-video" autoplay playsinline muted></video>
+                                <canvas id="reg-canvas" class="overlay-canvas"></canvas>
+                            </div>
+                            <p class="text-muted small mb-0"><i class="fa-solid fa-circle-info me-1"></i>Giữ khuôn mặt nằm gọn trong khung oval, đủ sáng và không có người khác chen ngang phía sau.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= TAB 3: ĐIỂM DANH TRỰC TIẾP ================= -->
+            <div class="tab-pane fade" id="tab-scanner" role="tabpanel">
+                <div class="row g-4">
+                    <!-- CAMERA & CẤU HÌNH THỜI GIAN -->
+                    <div class="col-lg-7">
+                        <div class="card p-4 mb-4">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h4 class="fw-bold mb-0"><i class="fa-solid fa-shield-halved text-success me-2"></i>Camera Quét Điểm Danh</h4>
+                                <div>
+                                    <button id="btn-toggle-scanner" class="btn btn-success fw-bold px-4" onclick="toggleScannerCamera()"><i class="fa-solid fa-play me-2"></i>BẮT ĐẦU ĐIỂM DANH</button>
+                                    <button id="btn-switch-scan-cam" class="btn btn-outline-secondary ms-2" onclick="switchCamera('scan')" disabled><i class="fa-solid fa-camera-rotate"></i></button>
+                                </div>
+                            </div>
+
+                            <div class="camera-container mb-3">
+                                <video id="scan-video" autoplay playsinline muted></video>
+                                <canvas id="scan-canvas" class="overlay-canvas"></canvas>
+                            </div>
+
+                            <!-- BANNER THÔNG BÁO QUÉT THÀNH CÔNG -->
+                            <div id="scan-success-banner" class="alert alert-success d-none py-2 px-3 mb-0 shadow-sm d-flex align-items-center justify-content-between">
+                                <div class="d-flex align-items-center">
+                                    <i class="fa-solid fa-circle-check fs-3 me-3 text-success"></i>
+                                    <div>
+                                        <h5 class="fw-bold mb-0" id="banner-student-name">NGUYỄN VĂN A</h5>
+                                        <small class="text-muted" id="banner-student-details">Lớp: 10A1 | Giờ: 07:30:12 | Đúng giờ</small>
+                                    </div>
+                                </div>
+                                <span class="badge bg-success fs-6 pulse-badge" id="banner-status-badge">ĐÚNG GIỜ</span>
+                            </div>
+                        </div>
+
+                        <!-- CẤU HÌNH MỐC GIỜ ĐIỂM DANH -->
+                        <div class="card p-4">
+                            <h5 class="fw-bold mb-3"><i class="fa-solid fa-clock text-primary me-2"></i>Cấu hình Mốc Giờ Điểm Danh</h5>
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-semibold">Giờ vào lớp chuẩn:</label>
+                                    <input type="time" id="cfg-time-on-time" class="form-control" value="07:30" onchange="saveAttendanceConfigs()">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small fw-semibold">Bắt đầu tính Muộn đến:</label>
+                                    <input type="time" id="cfg-time-late-limit" class="form-control" value="08:00" onchange="saveAttendanceConfigs()">
+                                </div>
+                                <div class="col-md-4 d-flex align-items-end">
+                                    <div class="text-muted small">Sau mốc muộn hệ thống tự động tính trạng thái <strong>Vắng mặt</strong>.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- LỊCH SỬ QUÉT TRỰC TIẾP -->
+                    <div class="col-lg-5">
+                        <div class="card p-4 h-100 d-flex flex-column">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h5 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary me-2"></i>Nhật ký Quét Phiên Này</h5>
+                                <button class="btn btn-outline-danger btn-sm" onclick="clearCurrentSessionLogs()"><i class="fa-solid fa-rotate-right me-1"></i> Làm mới phiên</button>
+                            </div>
+
+                            <div class="scanner-log-box flex-grow-1 border rounded p-2 bg-light" id="scanner-log-container">
+                                <div class="text-center text-muted py-5">
+                                    <i class="fa-solid fa-fingerprint fs-1 mb-2 opacity-50"></i>
+                                    <p class="small mb-0">Chưa có học sinh điểm danh trong phiên này.<br>Hãy bấm "Bắt đầu điểm danh" để quét.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ================= TAB 4: BÁO CÁO & THỐNG KÊ ================= -->
+            <div class="tab-pane fade" id="tab-reports" role="tabpanel">
+                <!-- THẺ THỐNG KÊ TỔNG QUAN -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-4">
+                        <div class="card p-3 stat-card success">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <p class="text-muted mb-1 small fw-semibold">ĐÚNG GIỜ</p>
+                                    <h3 class="fw-bold mb-0 text-success" id="stat-count-ontime">0</h3>
+                                </div>
+                                <div class="fs-1 text-success opacity-25"><i class="fa-solid fa-user-check"></i></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 stat-card warning">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <p class="text-muted mb-1 small fw-semibold">ĐI MUỘN</p>
+                                    <h3 class="fw-bold mb-0 text-warning" id="stat-count-late">0</h3>
+                                </div>
+                                <div class="fs-1 text-warning opacity-25"><i class="fa-solid fa-user-clock"></i></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card p-3 stat-card danger">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <p class="text-muted mb-1 small fw-semibold">VẮNG MẶT</p>
+                                    <h3 class="fw-bold mb-0 text-danger" id="stat-count-absent">0</h3>
+                                </div>
+                                <div class="fs-1 text-danger opacity-25"><i class="fa-solid fa-user-slash"></i></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BỘ LỌC BÁO CÁO & XUẤT EXCEL -->
+                <div class="card p-3 mb-4">
+                    <div class="row g-3 align-items-center">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold mb-1">Chọn Ngày:</label>
+                            <input type="date" id="report-date-filter" class="form-control" onchange="renderReportsTable()">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold mb-1">Lọc theo Lớp:</label>
+                            <select id="report-class-filter" class="form-select" onchange="renderReportsTable()">
+                                <option value="">-- Tất cả các lớp --</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 text-md-end mt-4">
+                            <button class="btn btn-success" onclick="exportAttendanceExcel()"><i class="fa-solid fa-file-excel me-2"></i>Xuất Báo cáo Excel (.xlsx)</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BẢNG CHI TIẾT BÁO CÁO -->
+                <div class="card p-3">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>STT</th>
+                                    <th>Mã HS</th>
+                                    <th>Họ và tên</th>
+                                    <th>Lớp</th>
+                                    <th>Giờ quét</th>
+                                    <th>Trạng thái</th>
+                                    <th>SĐT Phụ huynh</th>
+                                    <th class="text-center">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="reports-table-body">
+                                <!-- Dynamic rendered -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- MODAL THÊM HỌC SINH THỦ CÔNG -->
+    <div class="modal fade" id="addStudentModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-user-plus text-primary me-2"></i>Thêm Học sinh thủ công</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="add-student-form">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Mã học sinh (ID):</label>
+                            <input type="text" id="input-student-id" class="form-control" required placeholder="Ví dụ: HS1001">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Họ và tên:</label>
+                            <input type="text" id="input-student-name" class="form-control" required placeholder="Ví dụ: Nguyễn Văn A">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Lớp:</label>
+                            <input type="text" id="input-student-class" class="form-control" required placeholder="Ví dụ: 10A1">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Số điện thoại phụ huynh:</label>
+                            <input type="text" id="input-student-phone" class="form-control" placeholder="Ví dụ: 0912345678">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-primary" onclick="saveManualStudent()">Lưu học sinh</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= JAVASCRIPT LOGIC ================= -->
+    <script>
+        // --- 1. CẤU HÌNH & KHỞI TẠO DB ---
+        const DB_NAME = "SmartAttendanceDB";
+        const DB_VERSION = 1;
+        let db = null;
+
+        let faceMatcher = null;
+        let allStudentsCache = [];
+        let attendanceLogsCache = [];
+        
+        let activeCamStream = null;
+        let currentFacingMode = 'user'; // 'user' (trước) hoặc 'environment' (sau)
+        let activeScannerInterval = null;
+        let isScanningActive = false;
+
+        // Bộ nhớ tạm chống lặp (Anti-Flicker & Cooldown)
+        let consecutiveMatches = {}; // { studentId: count }
+        let recentCooldowns = {};    // { studentId: timestamp }
+        const COOLDOWN_TIME_MS = 30000; // Khóa 30 giây sau khi điểm danh thành công
+
+        // Web Audio API Beep Sound Generator
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playBeepSound(type = 'success') {
+            if (!audioCtx) return;
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'success') {
+                osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            } else {
+                osc.frequency.setValueAtTime(220, audioCtx.currentTime); // A3
+                gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            }
+        }
+
+        // --- KHỞI TẠO INDEXEDDB ---
+        function initIndexedDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onerror = (event) => reject(event.target.error);
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    resolve(db);
+                };
+                request.onupgradeneeded = (event) => {
+                    const dbInstance = event.target.result;
+                    if (!dbInstance.objectStoreNames.contains('students')) {
+                        dbInstance.createObjectStore('students', { keyPath: 'id' });
+                    }
+                    if (!dbInstance.objectStoreNames.contains('attendance')) {
+                        const attStore = dbInstance.createObjectStore('attendance', { keyPath: 'key' });
+                        attStore.createIndex('date', 'date', { unique: false });
+                    }
+                };
+            });
+        }
+
+        // --- 2. NẠP MODEL AI VỚI TIMEOUT & FALLBACK CDN ---
+        const CDN_MIRRORS = [
+            "https://cdn.jsdelivr.net/gh/cgarciagl/face-api.js@0.22.2/weights/",
+            "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/"
+        ];
+
+        async function loadAiModelsWithFallback() {
+            const progressBar = document.getElementById("loading-progress-bar");
+            const statusText = document.getElementById("loading-status-text");
+            const errorBox = document.getElementById("loading-error-box");
+            const loadingOverlay = document.getElementById("loading-overlay");
+
+            let loaded = false;
+            let lastError = null;
+
+            for (let i = 0; i < CDN_MIRRORS.length; i++) {
+                const modelUrl = CDN_MIRRORS[i];
+                try {
+                    statusText.innerText = `Đang kết nối CDN Mirror ${i + 1}...`;
+                    progressBar.style.width = "20%";
+
+                    // Timeout promise cho việc tải model
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error("Timeout tải model AI (>10s)")), 12000)
+                    );
+
+                    statusText.innerText = `Đang nạp SSD Mobilenet V1...`;
+                    await Promise.race([
+                        faceapi.nets.ssdMobilenetv1.loadFromUri(modelUrl),
+                        timeoutPromise
+                    ]);
+                    progressBar.style.width = "50%";
+
+                    statusText.innerText = `Đang nạp Face Landmark 68...`;
+                    await Promise.race([
+                        faceapi.nets.faceLandmark68Net.loadFromUri(modelUrl),
+                        timeoutPromise
+                    ]);
+                    progressBar.style.width = "80%";
+
+                    statusText.innerText = `Đang nạp Face Recognition Net...`;
+                    await Promise.race([
+                        faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl),
+                        timeoutPromise
+                    ]);
+                    progressBar.style.width = "100%";
+                    statusText.innerText = "Khởi tạo AI thành công!";
+                    loaded = true;
+                    break;
+                } catch (err) {
+                    lastError = err;
+                    console.warn(`Lỗi nạp từ mirror ${modelUrl}:`, err);
+                }
+            }
+
+            if (!loaded) {
+                errorBox.classList.remove('d-none');
+                errorBox.innerHTML = `<strong>Lỗi tải mô hình AI:</strong> ${lastError.message}. Vui lòng kiểm tra kết nối mạng và làm mới trang.`;
+                statusText.innerText = "Không thể nạp mô hình AI!";
+                return;
+            }
+
+            // Ẩn màn hình chờ
+            setTimeout(() => {
+                loadingOverlay.style.opacity = '0';
+                setTimeout(() => loadingOverlay.remove(), 500);
+            }, 400);
+
+            // Nạp dữ liệu học sinh & xây dựng FaceMatcher
+            await refreshSystemData();
+        }
+
+        // --- 3. ĐỒNG BỘ DỮ LIỆU & FACEMATCHER ---
+        async function refreshSystemData() {
+            if (!db) return;
+            allStudentsCache = await getAllStudentsFromDB();
+            attendanceLogsCache = await getAllAttendanceLogsFromDB();
+
+            updateClassDropdowns();
+            renderStudentsTable();
+            renderReportsTable();
+            buildFaceMatcher();
+        }
+
+        function getAllStudentsFromDB() {
+            return new Promise((resolve) => {
+                const transaction = db.transaction(['students'], 'readonly');
+                const store = transaction.objectStore('students');
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => resolve([]);
+            });
+        }
+
+        function getAllAttendanceLogsFromDB() {
+            return new Promise((resolve) => {
+                const transaction = db.transaction(['attendance'], 'readonly');
+                const store = transaction.objectStore('attendance');
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => resolve([]);
+            });
+        }
+
+        function buildFaceMatcher() {
+            const labeledDescriptors = [];
+            allStudentsCache.forEach(student => {
+                if (student.descriptors && student.descriptors.length > 0) {
+                    const float32Descs = student.descriptors.map(d => new Float32Array(d));
+                    labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(student.id, float32Descs));
+                }
+            });
+
+            if (labeledDescriptors.length > 0) {
+                // Ngưỡng Euclidean Distance 0.40 (tối ưu hóa độ chính xác, tương đồng >85-90%)
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.40);
+            } else {
+                faceMatcher = null;
+            }
+        }
+
+        // --- 4. TAB 1: QUẢN LÝ HỌC SINH & EXCEL ---
+        function generateSampleExcel() {
+            const templateData = [
+                { "STT": 1, "Mã học sinh": "HS1001", "Họ và tên": "Nguyễn Văn An", "Lớp": "10A1", "Số điện thoại phụ huynh": "0912345678" },
+                { "STT": 2, "Mã học sinh": "HS1002", "Họ và tên": "Trần Thị Bình", "Lớp": "10A1", "Số điện thoại phụ huynh": "0987654321" },
+                { "STT": 3, "Mã học sinh": "HS1003", "Họ và tên": "Lê Hoàng Cường", "Lớp": "10A2", "Số điện thoại phụ huynh": "0901122334" }
+            ];
+            const worksheet = XLSX.utils.json_to_sheet(templateData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "DanhSachHocSinh");
+            XLSX.writeFile(workbook, "Danh_Sach_Mau.xlsx");
+        }
+
+        function handleExcelUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const jsonRows = XLSX.utils.sheet_to_json(worksheet);
+
+                    let countAdded = 0;
+                    const transaction = db.transaction(['students'], 'readwrite');
+                    const store = transaction.objectStore('students');
+
+                    for (let row of jsonRows) {
+                        const id = String(row["Mã học sinh"] || row["Mã HS"] || "").trim();
+                        const name = String(row["Họ và tên"] || row["Họ tên"] || "").trim();
+                        const className = String(row["Lớp"] || "").trim();
+                        const phone = String(row["Số điện thoại phụ huynh"] || row["SĐT"] || "").trim();
+
+                        if (id && name && className) {
+                            // Kiểm tra xem học sinh đã tồn tại chưa để giữ lại mẫu khuôn mặt cũ nếu có
+                            const existing = await new Promise(resolve => {
+                                const req = store.get(id);
+                                req.onsuccess = () => resolve(req.result);
+                                req.onerror = () => resolve(null);
+                            });
+
+                            const studentObj = {
+                                id: id,
+                                name: name,
+                                className: className,
+                                phone: phone,
+                                descriptors: existing ? existing.descriptors : []
+                            };
+                            store.put(studentObj);
+                            countAdded++;
+                        }
+                    }
+
+                    transaction.oncomplete = async () => {
+                        alert(`Đã nhập thành công ${countAdded} học sinh từ file Excel!`);
+                        document.getElementById('excel-file-input').value = "";
+                        await refreshSystemData();
+                    };
+                } catch (err) {
+                    console.error(err);
+                    alert("Lỗi đọc file Excel! Vui lòng kiểm tra định dạng file mẫu.");
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function saveManualStudent() {
+            const id = document.getElementById('input-student-id').value.trim();
+            const name = document.getElementById('input-student-name').value.trim();
+            const className = document.getElementById('input-student-class').value.trim();
+            const phone = document.getElementById('input-student-phone').value.trim();
+
+            if (!id || !name || !className) {
+                alert("Vui lòng điền đầy đủ Mã HS, Họ tên và Lớp!");
+                return;
+            }
+
+            const transaction = db.transaction(['students'], 'readwrite');
+            const store = transaction.objectStore('students');
+
+            const reqGet = store.get(id);
+            reqGet.onsuccess = () => {
+                const existing = reqGet.result;
+                const studentObj = {
+                    id: id,
+                    name: name,
+                    className: className,
+                    phone: phone,
+                    descriptors: existing ? existing.descriptors : []
+                };
+
+                store.put(studentObj);
+                transaction.oncomplete = async () => {
+                    bootstrap.Modal.getInstance(document.getElementById('addStudentModal')).hide();
+                    document.getElementById('add-student-form').reset();
+                    alert("Đã lưu học sinh thành công!");
+                    await refreshSystemData();
+                };
+            };
+        }
+
+        function updateClassDropdowns() {
+            const classes = [...new Set(allStudentsCache.map(s => s.className))].sort();
+            
+            const filterClass = document.getElementById('student-filter-class');
+            const regClass = document.getElementById('reg-class-select');
+            const reportClass = document.getElementById('report-class-filter');
+
+            const currentFilter = filterClass.value;
+            const currentRegClass = regClass.value;
+            const currentReportClass = reportClass.value;
+
+            let optionsHtml = '<option value="">-- Tất cả các lớp --</option>';
+            classes.forEach(c => { optionsHtml += `<option value="${c}">${c}</option>`; });
+            filterClass.innerHTML = optionsHtml;
+            filterClass.value = currentFilter;
+
+            let regOptionsHtml = '<option value="">-- Chọn lớp học --</option>';
+            classes.forEach(c => { regOptionsHtml += `<option value="${c}">${c}</option>`; });
+            regClass.innerHTML = regOptionsHtml;
+            regClass.value = currentRegClass;
+
+            let reportOptionsHtml = '<option value="">-- Tất cả các lớp --</option>';
+            classes.forEach(c => { reportOptionsHtml += `<option value="${c}">${c}</option>`; });
+            reportClass.innerHTML = reportOptionsHtml;
+            reportClass.value = currentReportClass;
+        }
+
+        function renderStudentsTable() {
+            const tbody = document.getElementById('students-table-body');
+            const searchVal = document.getElementById('student-search-input').value.toLowerCase();
+            const classVal = document.getElementById('student-filter-class').value;
+
+            const filtered = allStudentsCache.filter(s => {
+                const matchSearch = s.id.toLowerCase().includes(searchVal) || s.name.toLowerCase().includes(searchVal);
+                const matchClass = classVal === "" || s.className === classVal;
+                return matchSearch && matchClass;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">Không tìm thấy học sinh nào.</td></tr>`;
+                return;
+            }
+
+            let html = "";
+            filtered.forEach((s, index) => {
+                const sampleCount = s.descriptors ? s.descriptors.length : 0;
+                const statusBadge = sampleCount > 0 
+                    ? `<span class="badge bg-success badge-status">Đã lấy mẫu (${sampleCount} mẫu)</span>` 
+                    : `<span class="badge bg-warning text-dark badge-status">Chưa lấy mẫu</span>`;
+
+                html += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td class="fw-semibold">${s.id}</td>
+                        <td>${s.name}</td>
+                        <td><span class="badge bg-secondary">${s.className}</span></td>
+                        <td>${s.phone || '---'}</td>
+                        <td>${statusBadge}</td>
+                        <td class="text-center">
+                            ${sampleCount > 0 ? `<button class="btn btn-outline-warning btn-sm me-1" title="Xóa mẫu khuôn mặt" onclick="clearStudentFaceSample('${s.id}')"><i class="fa-solid fa-user-slash"></i></button>` : ''}
+                            <button class="btn btn-outline-danger btn-sm" title="Xóa học sinh" onclick="deleteStudent('${s.id}')"><i class="fa-solid fa-trash"></i></button>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function deleteStudent(id) {
+            if (!confirm(`Bạn có chắc muốn xóa học sinh có mã ${id}?`)) return;
+            const transaction = db.transaction(['students'], 'readwrite');
+            transaction.objectStore('students').delete(id);
+            transaction.oncomplete = async () => {
+                await refreshSystemData();
+            };
+        }
+
+        function clearStudentFaceSample(id) {
+            if (!confirm(`Bạn có chắc muốn xóa dữ liệu mẫu khuôn mặt của học sinh ${id} để lấy lại mẫu mới?`)) return;
+            const transaction = db.transaction(['students'], 'readwrite');
+            const store = transaction.objectStore('students');
+            const req = store.get(id);
+            req.onsuccess = () => {
+                const student = req.result;
+                if (student) {
+                    student.descriptors = [];
+                    store.put(student);
+                }
+            };
+            transaction.oncomplete = async () => {
+                alert("Đã xóa mẫu khuôn mặt thành công!");
+                await refreshSystemData();
+                if (document.getElementById('reg-student-select').value === id) {
+                    onSelectStudentToRegister();
+                }
+            };
+        }
+
+        function confirmClearAllStudents() {
+            if (!confirm("CẢNH BÁO: Thao tác này sẽ xóa toàn bộ danh sách học sinh và mẫu khuôn mặt trong hệ thống! Bạn có chắc chắn?")) return;
+            const transaction = db.transaction(['students'], 'readwrite');
+            transaction.objectStore('students').clear();
+            transaction.oncomplete = async () => {
+                alert("Đã xóa toàn bộ học sinh.");
+                await refreshSystemData();
+            };
+        }
+
+        // --- 5. TAB 2: LẤY MẪU KHUÔN MẶT (REGISTRATION) ---
+        function updateRegStudentList() {
+            const classVal = document.getElementById('reg-class-select').value;
+            const studentSelect = document.getElementById('reg-student-select');
+
+            const studentsInClass = allStudentsCache.filter(s => s.className === classVal);
+            let html = '<option value="">-- Chọn học sinh --</option>';
+            studentsInClass.forEach(s => {
+                html += `<option value="${s.id}">${s.id} - ${s.name}</option>`;
+            });
+            studentSelect.innerHTML = html;
+            document.getElementById('student-reg-info').classList.add('d-none');
+            document.getElementById('btn-capture-face').disabled = true;
+        }
+
+        function onSelectStudentToRegister() {
+            const studentId = document.getElementById('reg-student-select').value;
+            const infoBox = document.getElementById('student-reg-info');
+            const btnCapture = document.getElementById('btn-capture-face');
+
+            if (!studentId) {
+                infoBox.classList.add('d-none');
+                btnCapture.disabled = true;
+                return;
+            }
+
+            const student = allStudentsCache.find(s => s.id === studentId);
+            if (student) {
+                document.getElementById('info-reg-name').innerText = student.name;
+                document.getElementById('info-reg-id').innerText = student.id;
+                const count = student.descriptors ? student.descriptors.length : 0;
+                document.getElementById('info-reg-count').innerText = `${count} mẫu`;
+                infoBox.classList.remove('d-none');
+                btnCapture.disabled = !activeCamStream;
+            }
+        }
+
+        async function toggleRegistrationCamera() {
+            const video = document.getElementById('reg-video');
+            const btnToggle = document.getElementById('btn-toggle-reg-cam');
+            const btnSwitch = document.getElementById('btn-switch-reg-cam');
+            const btnCapture = document.getElementById('btn-capture-face');
+            const guidanceBox = document.getElementById('reg-guidance-box');
+
+            if (activeCamStream) {
+                // Tắt camera
+                activeCamStream.getTracks().forEach(track => track.stop());
+                activeCamStream = null;
+                video.srcObject = null;
+                btnToggle.innerHTML = `<i class="fa-solid fa-video me-2"></i>Bật Camera Lấy mẫu`;
+                btnToggle.className = "btn btn-outline-primary";
+                btnSwitch.disabled = true;
+                btnCapture.disabled = true;
+                guidanceBox.classList.add('d-none');
+                return;
+            }
+
+            try {
+                guidanceBox.classList.remove('d-none');
+                document.getElementById('reg-guidance-text').innerText = "Đang kết nối camera...";
+
+                const constraints = {
+                    video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } }
+                };
+                activeCamStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = activeCamStream;
+                
+                if (currentFacingMode === 'user') {
+                    video.classList.add('front-camera');
+                } else {
+                    video.classList.remove('front-camera');
+                }
+
+                btnToggle.innerHTML = `<i class="fa-solid fa-video-slash me-2"></i>Tắt Camera`;
+                btnToggle.className = "btn btn-outline-danger";
+                btnSwitch.disabled = false;
+                
+                const selectedStudentId = document.getElementById('reg-student-select').value;
+                if (selectedStudentId) btnCapture.disabled = false;
+
+                document.getElementById('reg-guidance-text').innerText = "Đã sẵn sàng. Đưa khuôn mặt vào khung oval.";
+                startRegistrationRealtimeValidation();
+            } catch (err) {
+                console.error(err);
+                alert("Không thể truy cập camera! Vui lòng cấp quyền camera trong trình duyệt.");
+                guidanceBox.classList.add('d-none');
+            }
+        }
+
+        async function switchCamera(mode) {
+            currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            if (activeCamStream) {
+                activeCamStream.getTracks().forEach(track => track.stop());
+                activeCamStream = null;
+            }
+            if (mode === 'reg') {
+                await toggleRegistrationCamera();
+            } else if (mode === 'scan') {
+                await toggleScannerCamera();
+                await toggleScannerCamera(); // Bật lại với cam mới
+            }
+        }
+
+        function startRegistrationRealtimeValidation() {
+            const video = document.getElementById('reg-video');
+            const canvas = document.getElementById('reg-canvas');
+            const ovalGuide = document.getElementById('reg-oval-guide');
+            const guidanceText = document.getElementById('reg-guidance-text');
+
+            async function validateFrame() {
+                if (!activeCamStream || !video.srcObject) return;
+
+                const displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
+                faceapi.matchDimensions(canvas, displaySize);
+
+                // Dùng SSD Mobilenet V1 với minConfidence 0.55
+                const detections = await faceapi.detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.55 }))
+                    .withFaceLandmarks();
+
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (!detections) {
+                    ovalGuide.classList.remove('valid');
+                    guidanceText.innerText = "Không tìm thấy khuôn mặt trong khung hình!";
+                    setTimeout(validateFrame, 300);
+                    return;
+                }
+
+                const box = detections.detection.box;
+                const area = box.width * box.height;
+                const minArea = 110 * 110;
+
+                if (area < minArea) {
+                    ovalGuide.classList.remove('valid');
+                    guidanceText.innerText = "Khuôn mặt quá nhỏ hoặc ở xa. Vui lòng lại gần hơn!";
+                    setTimeout(validateFrame, 300);
+                    return;
+                }
+
+                // Kiểm tra khuôn mặt có nằm gần tâm oval không
+                const centerX = box.x + box.width / 2;
+                const centerY = box.y + box.height / 2;
+                const vidCenterX = displaySize.width / 2;
+                const vidCenterY = displaySize.height / 2;
+
+                if (Math.abs(centerX - vidCenterX) > 120 || Math.abs(centerY - vidCenterY) > 120) {
+                    ovalGuide.classList.remove('valid');
+                    guidanceText.innerText = "Vui lòng dịch chuyển khuôn mặt vào chính giữa khung oval!";
+                    setTimeout(validateFrame, 300);
+                    return;
+                }
+
+                ovalGuide.classList.add('valid');
+                guidanceText.innerText = "Khuôn mặt đạt chuẩn! Bạn có thể bấm nút Chụp lấy mẫu.";
+
+                if (activeCamStream) {
+                    setTimeout(validateFrame, 300);
+                }
+            }
+
+            video.onloadedmetadata = () => {
+                validateFrame();
+            };
+        }
+
+        async function captureFaceSample() {
+            const studentId = document.getElementById('reg-student-select').value;
+            if (!studentId) {
+                alert("Vui lòng chọn học sinh trước khi chụp mẫu!");
+                return;
+            }
+
+            const video = document.getElementById('reg-video');
+            const btnCapture = document.getElementById('btn-capture-face');
+            btnCapture.disabled = true;
+            btnCapture.innerHTML = `<i class="fa-solid fa-spinner fa-spin me-2"></i>Đang xử lý vector AI...`;
+
+            // Trích xuất khuôn mặt kèm descriptor 128 chiều
+            const detection = await faceapi.detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.55 }))
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+
+            if (!detection) {
+                alert("Không bắt được khuôn mặt hợp lệ trong khoảnh khắc chụp. Vui lòng thử lại!");
+                btnCapture.disabled = false;
+                btnCapture.innerHTML = `<i class="fa-solid fa-camera me-2"></i>CHỤP LẤY MẪU KHUÔN MẶT`;
+                return;
+            }
+
+            const descriptorArray = Array.from(detection.descriptor); // Float32Array to standard array for IndexedDB
+
+            const transaction = db.transaction(['students'], 'readwrite');
+            const store = transaction.objectStore('students');
+            const req = store.get(studentId);
+
+            req.onsuccess = () => {
+                const student = req.result;
+                if (student) {
+                    if (!student.descriptors) student.descriptors = [];
+                    // Cho phép lưu tối đa 3 góc mặt
+                    if (student.descriptors.length >= 3) {
+                        student.descriptors.shift(); // Giữ lại 3 mẫu mới nhất
+                    }
+                    student.descriptors.push(descriptorArray);
+                    store.put(student);
+                }
+            };
+
+            transaction.oncomplete = async () => {
+                playBeepSound('success');
+                alert("Lấy mẫu khuôn mặt thành công!");
+                btnCapture.disabled = false;
+                btnCapture.innerHTML = `<i class="fa-solid fa-camera me-2"></i>CHỤP LẤY MẪU KHUÔN MẶT`;
+                await refreshSystemData();
+                onSelectStudentToRegister();
+            };
+        }
+
+        // --- 6. TAB 3: ĐIỂM DANH TRỰC TIẾP (ATTENDANCE SCANNER) ---
+        // Real-time Clock
+        setInterval(() => {
+            const now = new Date();
+            document.getElementById('real-time-clock').innerText = now.toTimeString().split(' ')[0];
+        }, 1000);
+
+        function saveAttendanceConfigs() {
+            // Lưu mốc giờ vào localStorage
+            const onTime = document.getElementById('cfg-time-on-time').value;
+            const lateLimit = document.getElementById('cfg-time-late-limit').value;
+            localStorage.setItem('cfg_on_time', onTime);
+            localStorage.setItem('cfg_late_limit', lateLimit);
+        }
+
+        // Khôi phục mốc giờ nếu có
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedOnTime = localStorage.getItem('cfg_on_time');
+            const savedLateLimit = localStorage.getItem('cfg_late_limit');
+            if (savedOnTime) document.getElementById('cfg-time-on-time').value = savedOnTime;
+            if (savedLateLimit) document.getElementById('cfg-time-late-limit').value = savedLateLimit;
+        });
+
+        async function toggleScannerCamera() {
+            const video = document.getElementById('scan-video');
+            const btnToggle = document.getElementById('btn-toggle-scanner');
+            const btnSwitch = document.getElementById('btn-switch-scan-cam');
+
+            if (isScanningActive) {
+                isScanningActive = false;
+                if (activeScannerInterval) clearInterval(activeScannerInterval);
+                if (activeCamStream) {
+                    activeCamStream.getTracks().forEach(t => t.stop());
+                    activeCamStream = null;
+                }
+                video.srcObject = null;
+                btnToggle.innerHTML = `<i class="fa-solid fa-play me-2"></i>BẮT ĐẦU ĐIỂM DANH`;
+                btnToggle.className = "btn btn-success fw-bold px-4";
+                btnSwitch.disabled = true;
+                return;
+            }
+
+            try {
+                const constraints = {
+                    video: { facingMode: currentFacingMode, width: { ideal: 640 }, height: { ideal: 480 } }
+                };
+                activeCamStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = activeCamStream;
+                if (currentFacingMode === 'user') {
+                    video.classList.add('front-camera');
+                } else {
+                    video.classList.remove('front-camera');
+                }
+
+                isScanningActive = true;
+                btnToggle.innerHTML = `<i class="fa-solid fa-stop me-2"></i>DỪNG ĐIỂM DANH`;
+                btnToggle.className = "btn btn-danger fw-bold px-4";
+                btnSwitch.disabled = false;
+
+                startLiveScannerLoop();
+            } catch (err) {
+                console.error(err);
+                alert("Không thể khởi động camera điểm danh!");
+            }
+        }
+
+        function startLiveScannerLoop() {
+            const video = document.getElementById('scan-video');
+            const canvas = document.getElementById('scan-canvas');
+
+            activeScannerInterval = setInterval(async () => {
+                if (!isScanningActive || !activeCamStream) return;
+
+                const displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
+                faceapi.matchDimensions(canvas, displaySize);
+
+                // Phát hiện TẤT CẢ khuôn mặt nhưng ưu tiên KHUÔN MẶT CHIẾM ƯU THẾ (Dominant Face Filter)
+                const detections = await faceapi.detectAllFaces(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.55 }))
+                    .withFaceLandmarks()
+                    .withFaceDescriptors();
+
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (!detections || detections.length === 0) {
+                    consecutiveMatches = {}; // Reset chống lặp nếu mất mặt
+                    return;
+                }
+
+                // Sắp xếp các bounding box theo diện tích (width * height) giảm dần để tìm Khuôn mặt lớn nhất ở tiền cảnh
+                const sortedDetections = detections.sort((a, b) => {
+                    const areaA = a.detection.box.width * a.detection.box.height;
+                    const areaB = b.detection.box.width * b.detection.box.height;
+                    return areaB - areaA; // Lớn nhất lên đầu
+                });
+
+                // Chỉ xử lý DUY NHẤT 01 khuôn mặt chiếm ưu thế ở tiền cảnh
+                const dominantFace = sortedDetections[0];
+                const box = dominantFace.detection.box;
+                const area = box.width * box.height;
+
+                // Vẽ các mặt phía sau mờ hơn hoặc bỏ qua
+                for (let i = 1; i < sortedDetections.length; i++) {
+                    const bgBox = sortedDetections[i].detection.box;
+                    new faceapi.draw.DrawBox(bgBox, { label: "Phía sau (Bỏ qua)", boxColor: 'rgba(150,150,150,0.5)' }).draw(canvas);
+                }
+
+                if (area < 100 * 100) {
+                    // Quá xa
+                    new faceapi.draw.DrawBox(box, { label: "Lại gần hơn...", boxColor: 'orange' }).draw(canvas);
+                    return;
+                }
+
+                let labelName = "Khách lạ / Chưa khớp";
+                let boxColor = 'red';
+                let matchedStudentId = null;
+
+                if (faceMatcher) {
+                    const bestMatch = faceMatcher.findBestMatch(dominantFace.descriptor);
+                    if (bestMatch && bestMatch.label !== "unknown") {
+                        matchedStudentId = bestMatch.label;
+                        const student = allStudentsCache.find(s => s.id === matchedStudentId);
+                        if (student) {
+                            labelName = `${student.name} (${Math.round((1 - bestMatch.distance) * 100)}%)`;
+                            boxColor = 'green';
+                        }
+                    }
+                }
+
+                // Vẽ bounding box cho mặt chiếm ưu thế
+                const drawBox = new faceapi.draw.DrawBox(box, { label: labelName, boxColor: boxColor });
+                drawBox.draw(canvas);
+
+                // Cơ chế ổn định nhận diện (Anti-Flicker Debounce: khớp liên tiếp ít nhất 3 frame)
+                if (matchedStudentId) {
+                    const nowTime = Date.now();
+                    // Kiểm tra cooldown 30 giây cho học sinh này
+                    if (recentCooldowns[matchedStudentId] && (nowTime - recentCooldowns[matchedStudentId] < COOLDOWN_TIME_MS)) {
+                        return; // Đang trong thời gian cooldown, không điểm danh lại lặp
+                    }
+
+                    consecutiveMatches[matchedStudentId] = (consecutiveMatches[matchedStudentId] || 0) + 1;
+
+                    if (consecutiveMatches[matchedStudentId] >= 3) {
+                        // Đạt chuẩn 3 frame liên tiếp -> Ghi nhận điểm danh
+                        consecutiveMatches[matchedStudentId] = 0;
+                        recentCooldowns[matchedStudentId] = nowTime;
+                        await recordAttendance(matchedStudentId);
+                    }
+                } else {
+                    consecutiveMatches = {};
+                }
+
+            }, 400); // Quét mỗi 400ms đảm bảo độ mượt và nhạy
+        }
+
+        async function recordAttendance(studentId) {
+            const student = allStudentsCache.find(s => s.id === studentId);
+            if (!student) return;
+
+            const now = new Date();
+            const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
+            const timeStr = now.toTimeString().split(' ')[0]; // HH:MM:SS
+            const key = `${studentId}_${dateStr}`;
+
+            // Xác định trạng thái Đúng giờ / Muộn
+            const onTimeConfig = document.getElementById('cfg-time-on-time').value || "07:30";
+            const lateLimitConfig = document.getElementById('cfg-time-late-limit').value || "08:00";
+
+            const scanTimeHM = timeStr.substring(0, 5);
+            let status = "Đúng giờ";
+            if (scanTimeHM > onTimeConfig && scanTimeHM <= lateLimitConfig) {
+                status = "Đi muộn";
+            } else if (scanTimeHM > lateLimitConfig) {
+                status = "Vắng mặt";
+            }
+
+            const attendanceRecord = {
+                key: key,
+                studentId: studentId,
+                name: student.name,
+                className: student.className,
+                phone: student.phone,
+                date: dateStr,
+                time: timeStr,
+                status: status
+            };
+
+            const transaction = db.transaction(['attendance'], 'readwrite');
+            transaction.objectStore('attendance').put(attendanceRecord);
+
+            transaction.oncomplete = async () => {
+                playBeepSound('success');
+                showSuccessBanner(student, timeStr, status);
+                await refreshSystemData();
+                appendLiveScannerLog(attendanceRecord);
+            };
+        }
+
+        function showSuccessBanner(student, timeStr, status) {
+            const banner = document.getElementById('scan-success-banner');
+            document.getElementById('banner-student-name').innerText = `${student.name} (${student.id})`;
+            document.getElementById('banner-student-details').innerText = `Lớp: ${student.className} | Giờ: ${timeStr}`;
+            const badge = document.getElementById('banner-status-badge');
+            badge.innerText = status;
+            badge.className = status === 'Đúng giờ' ? 'badge bg-success fs-6 pulse-badge' : 'badge bg-warning text-dark fs-6 pulse-badge';
+            
+            banner.classList.remove('d-none');
+            setTimeout(() => {
+                banner.classList.add('d-none');
+            }, 4000);
+        }
+
+        function appendLiveScannerLog(record) {
+            const container = document.getElementById('scanner-log-container');
+            // Xóa thông báo trống ban đầu nếu có
+            if (container.querySelector('.text-center')) {
+                container.innerHTML = "";
+            }
+
+            const badgeClass = record.status === 'Đúng giờ' ? 'bg-success' : (record.status === 'Đi muộn' ? 'bg-warning text-dark' : 'bg-danger');
+
+            const itemHtml = `
+                <div class="d-flex justify-content-between align-items-center border-bottom py-2 px-2 bg-white rounded mb-2 shadow-sm">
+                    <div>
+                        <h6 class="fw-bold mb-0">${record.name} <span class="badge bg-secondary small">${record.className}</span></h6>
+                        <small class="text-muted">Mã: ${record.studentId} | Lúc: ${record.time}</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge ${badgeClass} mb-1">${record.status}</span><br>
+                        <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size: 0.75rem;" onclick="deleteAttendanceLog('${record.key}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                    </div>
+                </div>
+            `;
+            container.insertAdjacentHTML('afterbegin', itemHtml);
+        }
+
+        function clearCurrentSessionLogs() {
+            document.getElementById('scanner-log-container').innerHTML = `
+                <div class="text-center text-muted py-5">
+                    <i class="fa-solid fa-fingerprint fs-1 mb-2 opacity-50"></i>
+                    <p class="small mb-0">Đã làm mới nhật ký phiên quét.</p>
+                </div>
+            `;
+            consecutiveMatches = {};
+            recentCooldowns = {};
+        }
+
+        function deleteAttendanceLog(key) {
+            if (!confirm("Bạn có muốn xóa lượt điểm danh này?")) return;
+            const transaction = db.transaction(['attendance'], 'readwrite');
+            transaction.objectStore('attendance').delete(key);
+            transaction.oncomplete = async () => {
+                await refreshSystemData();
+                // Tải lại nhật ký phiên quét
+                loadScannerSessionLogs();
+            };
+        }
+
+        function loadScannerSessionLogs() {
+            const container = document.getElementById('scanner-log-container');
+            const todayStr = new Date().toISOString().split('T')[0];
+            const todayLogs = attendanceLogsCache.filter(l => l.date === todayStr);
+
+            if (todayLogs.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted py-5">
+                        <i class="fa-solid fa-fingerprint fs-1 mb-2 opacity-50"></i>
+                        <p class="small mb-0">Chưa có học sinh điểm danh trong phiên này.<br>Hãy bấm "Bắt đầu điểm danh" để quét.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = "";
+            todayLogs.reverse().forEach(record => {
+                const badgeClass = record.status === 'Đúng giờ' ? 'bg-success' : (record.status === 'Đi muộn' ? 'bg-warning text-dark' : 'bg-danger');
+                html += `
+                    <div class="d-flex justify-content-between align-items-center border-bottom py-2 px-2 bg-white rounded mb-2 shadow-sm">
+                        <div>
+                            <h6 class="fw-bold mb-0">${record.name} <span class="badge bg-secondary small">${record.className}</span></h6>
+                            <small class="text-muted">Mã: ${record.studentId} | Lúc: ${record.time}</small>
+                        </div>
+                        <div class="text-end">
+                            <span class="badge ${badgeClass} mb-1">${record.status}</span><br>
+                            <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size: 0.75rem;" onclick="deleteAttendanceLog('${record.key}')"><i class="fa-solid fa-trash"></i> Xóa</button>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        // --- 7. TAB 4: BÁO CÁO & THỐNG KÊ (REPORTS) ---
+        // Thiết lập ngày mặc định là hôm nay khi mở trang
+        document.getElementById('report-date-filter').value = new Date().toISOString().split('T')[0];
+
+        function renderReportsTable() {
+            const dateVal = document.getElementById('report-date-filter').value;
+            const classVal = document.getElementById('report-class-filter').value;
+            const tbody = document.getElementById('reports-table-body');
+
+            // Lọc logs theo ngày
+            const filteredLogs = attendanceLogsCache.filter(l => {
+                const matchDate = !dateVal || l.date === dateVal;
+                const matchClass = !classVal || l.className === classVal;
+                return matchDate && matchClass;
+            });
+
+            // Tính thống kê tổng quan
+            let countOnTime = 0;
+            let countLate = 0;
+            let countAbsent = 0;
+
+            filteredLogs.forEach(l => {
+                if (l.status === 'Đúng giờ') countOnTime++;
+                else if (l.status === 'Đi muộn') countLate++;
+                else if (l.status === 'Vắng mặt') countAbsent++;
+            });
+
+            document.getElementById('stat-count-ontime').innerText = countOnTime;
+            document.getElementById('stat-count-late').innerText = countLate;
+            document.getElementById('stat-count-absent').innerText = countAbsent;
+
+            if (filteredLogs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center text-muted py-4">Không có dữ liệu điểm danh cho mốc thời gian này.</td></tr>`;
+                return;
+            }
+
+            let html = "";
+            filteredLogs.forEach((l, index) => {
+                const badgeClass = l.status === 'Đúng giờ' ? 'bg-success' : (l.status === 'Đi muộn' ? 'bg-warning text-dark' : 'bg-danger');
+                const phoneLink = l.phone ? `<a href="tel:${l.phone}" class="text-decoration-none fw-semibold"><i class="fa-solid fa-phone text-primary me-1"></i>${l.phone}</a>` : '---';
+
+                html += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td class="fw-semibold">${l.studentId}</td>
+                        <td>${l.name}</td>
+                        <td><span class="badge bg-secondary">${l.className}</span></td>
+                        <td><span class="font-monospace">${l.time || '---'}</span></td>
+                        <td><span class="badge ${badgeClass}">${l.status}</span></td>
+                        <td>${phoneLink}</td>
+                        <td class="text-center">
+                            <button class="btn btn-outline-danger btn-sm" title="Xóa kết quả" onclick="deleteAttendanceLog('${l.key}')"><i class="fa-solid fa-trash"></i></button>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function exportAttendanceExcel() {
+            const dateVal = document.getElementById('report-date-filter').value;
+            const classVal = document.getElementById('report-class-filter').value;
+
+            const filteredLogs = attendanceLogsCache.filter(l => {
+                const matchDate = !dateVal || l.date === dateVal;
+                const matchClass = !classVal || l.className === classVal;
+                return matchDate && matchClass;
+            });
+
+            if (filteredLogs.length === 0) {
+                alert("Không có dữ liệu để xuất báo cáo!");
+                return;
+            }
+
+            const exportData = filteredLogs.map((l, idx) => ({
+                "STT": idx + 1,
+                "Mã học sinh": l.studentId,
+                "Họ và tên": l.name,
+                "Lớp": l.className,
+                "Ngày điểm danh": l.date,
+                "Giờ quét": l.time,
+                "Trạng thái": l.status,
+                "SĐT Phụ huynh": l.phone
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "BaoCaoDiemDanh");
+            XLSX.writeFile(workbook, `Bao_Cao_Diem_Danh_${dateVal || 'Toan_Bo'}.xlsx`);
+        }
+
+        // --- 8. KHỞI CHẠY ỨNG DỤNG KHI DOM LOAD ---
+        document.addEventListener("DOMContentLoaded", async () => {
+            try {
+                await initIndexedDB();
+                await loadAiModelsWithFallback();
+                loadScannerSessionLogs();
+            } catch (err) {
+                console.error("Lỗi khởi tạo hệ thống:", err);
+            }
+        });
+    </script>
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
